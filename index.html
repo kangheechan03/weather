@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>날씨 예측 시스템</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+    body { font-family: sans-serif; background:#f5f7fa; margin:0; padding:2rem; }
+    h1 { text-align:center; color:#333; margin-bottom:1rem; }
+    .tabs { display:flex; justify-content:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
+    .tab { padding:0.7rem 1.2rem; background:#ccc; border-radius:5px; cursor:pointer; }
+    .tab.active { background:#2d6cdf; color:white; }
+    .area { display:none; }
+    .area.active { display:block; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:1rem; }
+    .card { background:white; border-radius:10px; padding:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+    .city-header { font-size:1.2rem; margin-bottom:.5rem; text-align:center; color:#444; }
+    .forecast-list, .rain-list { list-style:none; padding:0; margin:0; }
+    .forecast-item, .rain-item { display:flex; justify-content:space-between; padding:0.5rem 0; border-bottom:1px solid #eee; }
+    .btn-refresh { display:block; margin:1rem auto; padding:.8rem 1.2rem; border:none; background:#2d6cdf; color:white; border-radius:5px; cursor:pointer; }
+    .btn-refresh:hover { background:#1e50aa; }
+    .value { font-weight:bold; }
+    .footer {
+      text-align:center;
+      margin-top:3rem;
+      font-size:0.9rem;
+      color:#555;
+    }
+    .footer a {
+      color:#2d6cdf;
+      text-decoration:none;
+    }
+  </style>
+</head>
+<body>
+
+<h1>대한민국 광역시 날씨 예보 시스템</h1>
+
+<div class="tabs">
+  <div class="tab active" data-target="#weatherArea">🌤️ 날씨 예보</div>
+  <div class="tab" data-target="#rainArea">🌧️ 비 안 올 확률</div>
+</div>
+
+<div class="area active" id="weatherArea">
+  <button class="btn-refresh" id="refreshWeather">날씨 새로고침</button>
+  <div class="grid" id="weatherGrid"></div>
+</div>
+
+<div class="area" id="rainArea">
+  <button class="btn-refresh" id="refreshRain">강수 확률 분석</button>
+  <div class="grid" id="rainGrid"></div>
+</div>
+
+<script>
+const apiKey = 'pcUzccKB4IaJnGSDzNLNc6uPYvLXgfN/iRo7kkWyjDHqNcUjT9rjdl9Ui9nLZZUN2mNdHFCKrPOr3SpBX3IYAg==';
+
+// 탭 전환
+$('.tab').click(function(){
+  $('.tab').removeClass('active');
+  $(this).addClass('active');
+  $('.area').removeClass('active');
+  $($(this).data('target')).addClass('active');
+});
+
+// 광역시 + 제주 + 강원 좌표
+const cities = [
+  { name: '서울', nx: 60, ny: 127 },
+  { name: '부산', nx: 98, ny: 76 },
+  { name: '대구', nx: 89, ny: 90 },
+  { name: '인천', nx: 55, ny: 124 },
+  { name: '광주', nx: 58, ny: 74 },
+  { name: '대전', nx: 67, ny: 100 },
+  { name: '울산', nx: 102, ny: 84 },
+  { name: '제주', nx: 52, ny: 38 },
+  { name: '강원', nx: 73, ny: 134 }
+];
+
+// 기준 날짜 및 시간 계산
+function getBaseDtTm() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = ('0' + (now.getMonth() + 1)).slice(-2);
+  const d = ('0' + now.getDate()).slice(-2);
+  return { base_date: `${y}${m}${d}`, base_time: "0500" };
+}
+
+// 날씨 정보 불러오기
+function loadCityWeather(city) {
+  const dt = getBaseDtTm();
+  $.getJSON('https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst', {
+    serviceKey: apiKey,
+    pageNo: 1,
+    numOfRows: 200,
+    dataType: 'JSON',
+    base_date: dt.base_date,
+    base_time: dt.base_time,
+    nx: city.nx,
+    ny: city.ny
+  }, function(res) {
+    const items = res.response.body.items.item;
+    const today = items.filter(i => i.fcstTime === '1200');
+    let sky = '-', tmp = '-';
+    today.forEach(i => {
+      if (i.category === 'SKY') sky = i.fcstValue;
+      if (i.category === 'TMP') tmp = i.fcstValue;
+    });
+    const skyMap = { '1': '☀️ 맑음', '3': '⛅ 구름많음', '4': '☁️ 흐림' };
+    const html = `
+      <div class="city-header">${city.name}</div>
+      <ul class="forecast-list">
+        <li class="forecast-item"><span>하늘 상태</span><span>${skyMap[sky] || '-'}</span></li>
+        <li class="forecast-item"><span>기온</span><span>${tmp}°C</span></li>
+      </ul>`;
+    $(`#w-${city.name}`).html(html);
+  });
+}
+
+// 비 안 오는 기간 예측 (기하분포)
+function loadRainPrediction(city) {
+  const dt = getBaseDtTm();
+  $.getJSON('https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst', {
+    serviceKey: 'pcUzccKB4IaJnGSDzNLNc6uPYvLXgfN/iRo7kkWyjDHqNcUjT9rjdl9Ui9nLZZUN2mNdHFCKrPOr3SpBX3IYAg==',
+    pageNo: 1,
+    numOfRows: 200,
+    dataType: 'JSON',
+    base_date: dt.base_date,
+    base_time: dt.base_time,
+    nx: city.nx,
+    ny: city.ny
+  }, function(res) {
+    const items = res.response.body.items.item;
+    const popItem = items.find(i => i.fcstTime === '1200' && i.category === 'POP');
+    const rainProb = popItem ? parseFloat(popItem.fcstValue) : null;
+    let result = '정보 없음';
+    if (rainProb !== null) {
+      const p = rainProb / 100;
+      const expectedDays = p > 0 ? (1 / p).toFixed(1) : "∞";
+      result = `<ul class="rain-list">
+                  <li class="rain-item"><span>강수확률</span><span>${rainProb}%</span></li>
+                  <li class="rain-item"><span>비 안 올 예상일수</span><span>${expectedDays}일</span></li>
+                </ul>`;
+    }
+    $(`#r-${city.name}`).html(`<div class="city-header">${city.name}</div>${result}`);
+  });
+}
+
+// 날씨 섹션 로딩
+function refreshWeather() {
+  $('#weatherGrid').empty();
+  cities.forEach(city => {
+    $('#weatherGrid').append(`<div class="card" id="w-${city.name}">불러오는 중…</div>`);
+    loadCityWeather(city);
+  });
+}
+
+// 비 예측 섹션 로딩
+function refreshRain() {
+  $('#rainGrid').empty();
+  cities.forEach(city => {
+    $('#rainGrid').append(`<div class="card" id="r-${city.name}">불러오는 중…</div>`);
+    loadRainPrediction(city);
+  });
+}
+
+// 버튼 이벤트 연결
+$('#refreshWeather').on('click', refreshWeather);
+$('#refreshRain').on('click', refreshRain);
+
+// 최초 실행
+refreshWeather();
+refreshRain();
+</script>
+
+<!-- 하단 중앙 기상청 링크 -->
+<div class="footer">
+  📡 데이터 출처: 
+  <a href="https://www.kma.go.kr" target="_blank">대한민국 기상청 (KMA)</a>
+</div>
+
+</body>
+</html>
